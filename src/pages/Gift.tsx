@@ -6,6 +6,7 @@ import { Share2, Heart, ArrowLeft, Download } from 'lucide-react';
 import TemplateRenderer from '@/components/TemplateRenderer';
 import Button from '@/components/Button';
 import GiftBoxUnlock from '@/components/GiftBoxUnlock';
+import CardReveal from '@/components/CardReveal';
 import FloatingHearts from '@/components/FloatingHearts';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
@@ -14,8 +15,8 @@ interface GiftData {
   recipientName: string;
   occasion: string;
   message: string;
-  photoURL: string;
-  musicURL: string;
+  imageUrl: string;
+  musicUrl: string;
   template: string;
   createdAt: any;
 }
@@ -26,7 +27,7 @@ const Gift = () => {
   const [giftData, setGiftData] = useState<GiftData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [unlockStep, setUnlockStep] = useState(0);
 
   useEffect(() => {
     const fetchGift = async () => {
@@ -56,7 +57,11 @@ const Gift = () => {
   }, [giftId]);
 
   const handleUnlock = () => {
-    setIsUnlocked(true);
+    setUnlockStep(1);
+  };
+
+  const handleCardOpen = () => {
+    setUnlockStep(2);
   };
 
   const shareGift = async () => {
@@ -81,10 +86,10 @@ const Gift = () => {
   };
 
   const downloadImage = async () => {
-    if (!giftData?.photoURL) return;
+    if (!giftData?.imageUrl) return;
     
     try {
-      const response = await fetch(giftData.photoURL);
+      const response = await fetch(giftData.imageUrl);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       
@@ -165,74 +170,91 @@ const Gift = () => {
     );
   }
 
-  return (
-    <div className="relative overflow-hidden">
-      <FloatingHearts />
-      
-      {!isUnlocked ? (
-        <GiftBoxUnlock 
-          recipientName={giftData.recipientName} 
-          onUnlock={handleUnlock} 
-        />
-      ) : (
-        <>
-          <TemplateRenderer
+  const renderContent = () => {
+    switch (unlockStep) {
+      case 0:
+        return (
+          <GiftBoxUnlock
             recipientName={giftData.recipientName}
-            occasion={giftData.occasion}
-            message={giftData.message}
-            photoURL={giftData.photoURL}
-            musicURL={giftData.musicURL}
-            template={giftData.template}
-            isPreview={false}
+            onUnlock={handleUnlock}
           />
+        );
+      case 1:
+        return (
+          <CardReveal
+            recipientName={giftData.recipientName}
+            onOpen={handleCardOpen}
+          />
+        );
+      case 2:
+        return (
+          <>
+            <TemplateRenderer
+              recipientName={giftData.recipientName}
+              occasion={giftData.occasion}
+              message={giftData.message}
+              photoURL={giftData.imageUrl}
+              musicURL={giftData.musicUrl}
+              template={giftData.template}
+              isPreview={false}
+            />
 
-          {/* Floating Action Buttons */}
-          <motion.div
-            className="fixed bottom-6 right-6 flex flex-col gap-3 z-20"
-            initial={{ opacity: 0, x: 100 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 1 }}
-          >
-            <Button
-              onClick={shareGift}
-              variant="romantic"
-              size="sm"
-              className="shadow-lg"
+            {/* Floating Action Buttons */}
+            <motion.div
+              className="fixed bottom-6 right-6 flex flex-col gap-3 z-20"
+              initial={{ opacity: 0, x: 100 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 1 }}
             >
-              <Share2 className="w-4 h-4" />
-            </Button>
-            
-            {giftData.photoURL && (
               <Button
-                onClick={downloadImage}
-                variant="soft"
+                onClick={shareGift}
+                variant="romantic"
                 size="sm"
                 className="shadow-lg"
               >
-                <Download className="w-4 h-4" />
+                <Share2 className="w-4 h-4" />
               </Button>
-            )}
-          </motion.div>
 
-          {/* Create Your Own Gift CTA */}
-          <motion.div
-            className="fixed bottom-6 left-6 z-20"
-            initial={{ opacity: 0, x: -100 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 1.5 }}
-          >
-            <Button
-              onClick={() => navigate('/create')}
-              variant="outline"
-              size="sm"
-              className="shadow-lg backdrop-blur-sm"
+              {giftData.imageUrl && (
+                <Button
+                  onClick={downloadImage}
+                  variant="soft"
+                  size="sm"
+                  className="shadow-lg"
+                >
+                  <Download className="w-4 h-4" />
+                </Button>
+              )}
+            </motion.div>
+
+            {/* Create Your Own Gift CTA */}
+            <motion.div
+              className="fixed bottom-6 left-6 z-20"
+              initial={{ opacity: 0, x: -100 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 1.5 }}
             >
-              <Heart className="w-4 h-4" />
-              Create Your Own
-            </Button>
-          </motion.div>
-        </>
-      )}
+              <Button
+                onClick={() => navigate('/create')}
+                variant="outline"
+                size="sm"
+                className="shadow-lg backdrop-blur-sm"
+              >
+                <Heart className="w-4 h-4" />
+                Create Your Own
+              </Button>
+            </motion.div>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="relative overflow-hidden">
+      <FloatingHearts />
+      {renderContent()}
     </div>
   );
 };
