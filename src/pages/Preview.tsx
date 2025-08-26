@@ -10,8 +10,9 @@ import { useAuth } from '@/hooks/use-auth';
 import { UserDataService } from '@/lib/userDataService';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '@/lib/firebase';
-import { createGiftWithRetry, generateShareableLink, type GiftData } from '@/lib/giftService';
+import { db, storage, functions } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { generateShareableLink, type GiftData } from '@/lib/giftService';
 import { getOfflineGift } from '@/lib/offlineService';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -36,9 +37,9 @@ const Preview = () => {
     let finalMusicURL = giftData.musicURL;
 
     try {
+      const giftId = uuidv4();
       // Upload photo if it's a file
       if (giftData.photoFile) {
-        const giftId = uuidv4();
         finalPhotoURL = await UserDataService.uploadUserFile(
           user!.uid,
           giftData.photoFile,
@@ -49,7 +50,6 @@ const Preview = () => {
 
       // Upload music if it's a file
       if (giftData.musicFile) {
-        const giftId = giftData.photoFile ? uuidv4() : uuidv4(); // Use same ID if both files
         finalMusicURL = await UserDataService.uploadUserFile(
           user!.uid,
           giftData.musicFile,
@@ -77,18 +77,7 @@ const Preview = () => {
     setIsOfflineMode(false);
     
     try {
-      let finalPhotoURL = giftData.photoURL;
-      let finalMusicURL = giftData.musicURL;
-
-      // Try to upload files, but don't block if it fails
-      try {
-        const uploaded = await uploadFiles();
-        finalPhotoURL = uploaded.finalPhotoURL;
-        finalMusicURL = uploaded.finalMusicURL;
-      } catch (uploadError) {
-        console.log('Upload failed, using preview URLs:', uploadError);
-        toast.info('Using preview files - gift will still work!');
-      }
+      const { finalPhotoURL, finalMusicURL } = await uploadFiles();
 
       // Prepare gift data
       const giftData_: GiftData = {
@@ -103,27 +92,19 @@ const Preview = () => {
         musicUrl: finalMusicURL
       };
 
-      console.log('Creating gift with robust service...', giftData_);
+      console.log('Creating gift with cloud function...', giftData_);
 
-      // Use the robust gift creation service with retry logic
-      const giftId = await createGiftWithRetry(giftData_);
-      
-      // Check if this is an offline gift
-      const isOffline = giftId.startsWith('offline_');
-      setIsOfflineMode(isOffline);
+      const createGiftFunction = httpsCallable(functions, 'createGift');
+      const result = await createGiftFunction(giftData_);
+      const giftId = (result.data as any).giftId;
+
+      if (!giftId) {
+        throw new Error("Cloud function did not return a giftId.");
+      }
       
       const shareableLink = generateShareableLink(giftId);
       
-      if (isOffline) {
-        // Verify offline storage
-        const storedGift = getOfflineGift(giftId);
-        console.log('📱 Offline gift verified:', storedGift);
-        
-        toast.success('📱 Your love gift has been saved offline!', { duration: 5000 });
-        toast.info('🔄 Will sync when connection is restored', { duration: 5000 });
-      } else {
-        toast.success('🎉 Your love gift has been created!', { duration: 5000 });
-      }
+      toast.success('🎉 Your love gift has been created!', { duration: 5000 });
       
       // Copy link to clipboard automatically
       try {
@@ -136,23 +117,16 @@ const Preview = () => {
       // Store the link for display
       setGeneratedLink(shareableLink);
       
-      // Navigate to the gift page after a short delay (only for online gifts)
-      if (!isOffline) {
-        setTimeout(() => {
-          navigate(`/gift/${giftId}`);
-        }, 2000);
-      } else {
-        // For offline gifts, show a message about the link not working yet
-        toast.info('ℹ️ Link will work once the gift syncs online', { duration: 6000 });
-      }
-      
-      // Update user's gift count (non-blocking, only for online gifts)
-      if (!isOffline) {
-        try {
-          await UserDataService.incrementGiftCount(user.uid);
-        } catch (err) {
-          console.log('Could not update gift count:', err);
-        }
+      // Navigate to the gift page after a short delay
+      setTimeout(() => {
+        navigate(`/gift/${giftId}`);
+      }, 2000);
+
+      // Update user's gift count (non-blocking)
+      try {
+        await UserDataService.incrementGiftCount(user.uid);
+      } catch (err) {
+        console.log('Could not update gift count:', err);
       }
       
       // Reset store after navigation
